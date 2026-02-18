@@ -1,10 +1,21 @@
+#pragma once
+
+#include "lemlib/api.hpp"
+#include "pros/misc.h"
+#include "pros/motors.hpp"
+#include "pros/adi.hpp"
+#include "pros/imu.hpp"
+#include "pros/distance.hpp"
+#include "pros/rtos.hpp"
+#include "robot-config.h"
+
 /**
  * \file main.h
  *
  * Contains common definitions and header files used throughout your PROS
  * project.
  *
- * \copyright Copyright (c) 2017-2024, Purdue University ACM SIGBots.
+ * \copyright Copyright (c) 2017-2023, Purdue University ACM SIGBots.
  * All rights reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
@@ -34,12 +45,11 @@
  */
 #define PROS_USE_LITERALS
 
-#include "api.h"
-
 /**
  * You should add more #includes here
  */
 //#include "okapi/api.hpp"
+//#include "pros/api_legacy.h"
 
 /**
  * If you find doing pros::Motor() to be tedious and you'd prefer just to do
@@ -52,6 +62,15 @@
 // using namespace pros;
 // using namespace pros::literals;
 // using namespace okapi;
+
+extern lemlib::Drivetrain drivetrain;
+extern lemlib::TrackingWheel horizontal_tracking_wheel;
+extern lemlib::OdomSensors sensors;
+extern lemlib::ControllerSettings lateral_controller;
+extern lemlib::ControllerSettings angular_controller;
+extern lemlib::Chassis chassis;
+extern void drive_to_wall(float target_distance, float drive_max_voltage, float heading_kp, float settle_error, float timeout, bool relative_to_robot);
+
 
 /**
  * Prototypes for the competition control tasks are redefined here to ensure
