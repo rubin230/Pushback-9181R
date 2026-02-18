@@ -1,24 +1,51 @@
 #pragma once
+
 #include "pros/adi.hpp"
+#include "pros/misc.hpp"
 #include "pros/motors.hpp"
 #include "pros/imu.hpp"
+#include "pros/distance.hpp"
+#include "pros/rotation.hpp"
 
-// Controller
+/*----------------------------------------------------------------------------*/
+/*                            CORE COMPONENTS                                 */
+/*----------------------------------------------------------------------------*/
+
 extern pros::Controller controller;
 
-// Drivetrain
+/*----------------------------------------------------------------------------*/
+/*                            DRIVETRAIN MOTORS                               */
+/*----------------------------------------------------------------------------*/
+
+extern pros::Motor Left1;
+extern pros::Motor Left2;
+extern pros::Motor Left3;
+extern pros::Motor Right1;
+extern pros::Motor Right2;
+extern pros::Motor Right3;
+
 extern pros::MotorGroup lefty;
 extern pros::MotorGroup righty;
 
-// Subsystem Motors
-extern pros::Motor inner;
+/*----------------------------------------------------------------------------*/
+/*                           SUBSYSTEM MOTORS                                 */
+/*----------------------------------------------------------------------------*/
+
 extern pros::Motor outter;
+extern pros::Motor inner;
 
-// Pneumatics
-extern pros::adi::DigitalOut looog;
-extern pros::adi::DigitalOut middle;
-extern pros::adi::DigitalOut descore;
+/*----------------------------------------------------------------------------*/
+/*                             PNEUMATICS                                     */
+/*----------------------------------------------------------------------------*/
 
-// Sensors
+extern pros::ADIDigitalOut looog;
+extern pros::ADIDigitalOut middle;
+extern pros::ADIDigitalOut descore;
+
+/*----------------------------------------------------------------------------*/
+/*                              SENSORS                                       */
+/*----------------------------------------------------------------------------*/
+
 extern pros::Distance eyes;
 extern pros::Imu imu;
+extern pros::Rotation tracker;
