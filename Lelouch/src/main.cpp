@@ -1,11 +1,149 @@
 #include "main.h"
-#include "robot-config.h"
+#include "lemlib/api.hpp"
+#include "pros/misc.h"
+#include "pros/motors.hpp"
+#include "pros/adi.hpp"
+#include "pros/imu.hpp"
+#include "pros/distance.hpp"
 #include "pros/rtos.hpp"
-#include "pros/misc.hpp"
+#include "robot-config.h"
 
+// Drivetrain struct
+lemlib::Drivetrain drivetrain(&lefty, &righty, 8, lemlib::Omniwheel::NEW_325, 450, 2);
+
+lemlib::TrackingWheel tracking(&tracker, lemlib::Omniwheel::NEW_275, 0);
+// Controller construct
+
+lemlib::OdomSensors sensors(&tracking, // vertical tracking wheel 1, set to null
+                            nullptr, // vertical tracking wheel 2, set to nullptr as we are using IMEs
+                            nullptr, // horizontal tracking wheel 1
+                            nullptr, // horizontal tracking wheel 2, set to nullptr as we don't have a second one
+                            &imu // inertial sensor
+);
+ 
+// lateral PID controller
+lemlib::ControllerSettings lateral_controller(1, // proportional gain (kP)
+                                              0, // integral gain (kI)
+                                              0, // derivative gain (kD)
+                                              3, // anti windup
+                                              1, // small error range, in inches
+                                              100, // small error range timeout, in milliseconds
+                                              3, // large error range, in inches
+                                              1000, // large error range timeout, in milliseconds
+                                              5 // maximum acceleration (slew)
+);
+
+// angular PID controller
+lemlib::ControllerSettings angular_controller(3, // proportional gain (kP)
+                                              0, // integral gain (kI)
+                                              2.5, // derivative gain (kD)
+                                              3, // anti windup
+                                              1, // small error range, in degrees
+                                              100, // small error range timeout, in milliseconds
+                                              3, // large error range, in degrees
+                                              500, // large error range timeout, in milliseconds
+                                              0 // maximum acceleration (slew)
+);
+
+/*----------------------------------------------------------------------------*/
+/*                              Chassis                                       */
+/*----------------------------------------------------------------------------*/
+lemlib::Chassis chassis(drivetrain, // drivetrain settings
+                        lateral_controller, // lateral PID settings
+                        angular_controller, // angular PID settings
+                        sensors // odometry sensors
+);
 /*----------------------------------------------------------------------------*/
 /*                           INITIALIZATION                                   */
 /*----------------------------------------------------------------------------*/
+#include <cmath>
+
+void drive_to_wall(float target_distance,
+                   float drive_max_voltage,
+                   float heading_kp,
+                   float settle_error,
+                   float timeout,
+                   bool relative_to_robot) {
+
+    float drive_kp = relative_to_robot ? 4.0 : 0.05;
+    float drive_kd = relative_to_robot ? 17.0 : 0.5;
+
+    lemlib::Pose startPose = chassis.getPose();
+    float start_heading = startPose.theta;
+
+    float drive_error = target_distance;
+    float drive_prev_error = target_distance;
+    float heading_prev_error = 0;
+
+    int time_spent = 0;
+    int settle_time = 0;
+    const int settle_threshold = 200;
+
+    while (time_spent < timeout) {
+
+        if (relative_to_robot) {
+            lemlib::Pose currentPose = chassis.getPose();
+
+            float dx = currentPose.x - startPose.x;
+            float dy = currentPose.y - startPose.y;
+
+            float distance_traveled = std::sqrt(dx * dx + dy * dy);
+
+            drive_error = target_distance - distance_traveled;
+        }
+        else {
+            float current_distance = eyes.get(); // mm
+            drive_error = current_distance - target_distance;
+        }
+
+        float drive_derivative = drive_error - drive_prev_error;
+        drive_prev_error = drive_error;
+
+        float drive_output =
+            (drive_kp * drive_error) +
+            (drive_kd * drive_derivative);
+
+        // clamp to millivolts
+        if (drive_output > drive_max_voltage)
+            drive_output = drive_max_voltage;
+        if (drive_output < -drive_max_voltage)
+            drive_output = -drive_max_voltage;
+
+        // Heading correction
+        lemlib::Pose currentPose = chassis.getPose();
+        float heading_error = start_heading - currentPose.theta;
+
+        if (heading_error > 180) heading_error -= 360;
+        if (heading_error < -180) heading_error += 360;
+
+        float heading_derivative = heading_error - heading_prev_error;
+        heading_prev_error = heading_error;
+
+        float heading_correction =
+            (heading_kp * heading_error) +
+            (0.1 * heading_derivative);
+
+        float left_voltage = drive_output + heading_correction;
+        float right_voltage = drive_output - heading_correction;
+
+        chassis.tank(left_voltage,
+                     right_voltage);
+
+        if (fabs(drive_error) < settle_error) {
+            settle_time += 10;
+            if (settle_time >= settle_threshold)
+                break;
+        } else {
+            settle_time = 0;
+        }
+
+        pros::delay(10);
+        time_spent += 10;
+    }
+
+    chassis.tank(0, 0);
+}
+
 
 void vexcodeInit(void) {
   // Reserved for future initialization
@@ -19,13 +157,13 @@ void vexcodeInit(void) {
  * "I was pressed!" and nothing.
  */
 void on_center_button() {
-	static bool pressed = false;
-	pressed = !pressed;
-	if (pressed) {
-		pros::lcd::set_text(2, "I was pressed!");
-	} else {
-		pros::lcd::clear_line(2);
-	}
+    static bool pressed = false;
+    pressed = !pressed;
+    if (pressed) {
+        pros::lcd::set_text(2, "I was pressed!");
+    } else {
+        pros::lcd::clear_line(2);
+    }
 }
 
 /**
@@ -35,10 +173,14 @@ void on_center_button() {
  * to keep execution time for this mode under a few seconds.
  */
 void initialize() {
-	pros::lcd::initialize();
-	pros::lcd::set_text(1, "Hello PROS User!");
+    pros::lcd::initialize();
 
-	pros::lcd::register_btn1_cb(on_center_button);
+    pros::lcd::register_btn1_cb(on_center_button);
+    
+    imu.reset();
+    pros::delay(2000);        // wait for calibration
+    chassis.calibrate();
+    chassis.setPose(0, 0, 0); // starting position
 }
 
 /**
@@ -59,85 +201,6 @@ void disabled() {}
  */
 void competition_initialize() {}
 
-/**
- * Runs the user autonomous code. This function will be started in its own task
- * with the default priority and stack size whenever the robot is enabled via
- * the Field Management System or the VEX Competition Switch in the autonomous
- * mode. Alternatively, this function may be called in initialize or opcontrol
- * for non-competition testing purposes.
- *
- * If the robot is disabled or communications is lost, the autonomous task
- * will be stopped. Re-enabling the robot will restart the task, not re-start it
- * from where it left off.
- */
-void autonomous() {}
-
-/**
- * Runs the operator control code. This function will be started in its own task
- * with the default priority and stack size whenever the robot is enabled via
- * the Field Management System or the VEX Competition Switch in the operator
- * control mode.
- *
- * If no competition control is connected, this function will run immediately
- * following initialize().
- *
- * If the robot is disabled or communications is lost, the
- * operator control task will be stopped. Re-enabling the robot will restart the
- * task, not resume it from where it left off.
- */
-// --------------- Driver Control ---------------
-void opcontrol() {
-
-    while (true) {
-        double leftY = controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y);
-        double rightX = controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
-
-        leftY = pow(leftY, 3) / pow(10, 4);
-        rightX = pow(rightX, 3) / pow(10, 4);
-
-        double leftOutput = leftY + rightX;
-        double rightOutput = leftY - rightX;
-
-        lefty.move(leftOutput);
-        righty.move(rightOutput);
 
 
-        //chassis.curvature(leftY, rightX, false);
 
-        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
-            inner.move(-127);
-        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) {
-            inner.move(127);
-        } else {
-            inner.move(0);
-        }
-
-         if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
-            outter.move(-127);
-        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1)) {
-            outter.move(127);
-        } else {
-            outter.move(0);
-        }
-
-      static bool looog_state = false;
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_DOWN)) {
-            looog_state = !looog_state;
-            looog.set_value(looog_state);
-        }
-        
-      static bool middle_state = false;
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_DOWN)) {
-            middle_state = !middle_state;
-            middle.set_value(middle_state);
-        }
-  
-      static bool descore_state = false;
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_Y)) {
-            descore_state = !descore_state;
-            descore.set_value(descore_state);
-        }
-
-        pros::delay(20);
-    }
-}
